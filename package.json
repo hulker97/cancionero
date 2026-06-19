@@ -1,0 +1,20 @@
+{
+  "name": "cancionero",
+  "version": "1.0.0",
+  "description": "Juego para adivinar canciones de tus playlists de Spotify",
+  "main": "server/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "axios": "^1.7.2",
+    "dotenv": "^16.4.5",
+    "cookie-session": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

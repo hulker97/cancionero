@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#1f2a1f" />
+<title>Cancionero · Adivina la canción</title>
+<link rel="manifest" href="/manifest.json" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+  <div id="app">
+
+    <!-- PANTALLA: BIENVENIDA / LOGIN -->
+    <section id="screen-login" class="screen screen--active">
+      <div class="brand">
+        <span class="brand__mark">♪</span>
+        <h1 class="brand__title">Cancionero</h1>
+        <p class="brand__subtitle">Adivina tus propias canciones, si te atreves</p>
+      </div>
+
+      <div class="card card--login">
+        <p class="card__text">
+          Conecta tu cuenta de Spotify para leer tus playlists.
+          No guardamos ni publicamos nada: solo leemos los nombres de tus canciones.
+        </p>
+        <a href="/login" class="btn btn--primary" id="btn-spotify-login">
+          <span class="btn__icon">⏵</span> Conectar con Spotify
+        </a>
+        <p id="login-error" class="error-text" hidden></p>
+      </div>
+    </section>
+
+    <!-- PANTALLA: ELEGIR PLAYLIST -->
+    <section id="screen-playlists" class="screen">
+      <header class="topbar">
+        <h2 class="topbar__title">Elige una lista</h2>
+        <button class="btn btn--ghost btn--small" id="btn-logout">Salir</button>
+      </header>
+      <div id="playlists-loading" class="loading">Cargando tus listas&hellip;</div>
+      <div id="playlists-grid" class="playlist-grid" hidden></div>
+    </section>
+
+    <!-- PANTALLA: PREPARANDO PARTIDA -->
+    <section id="screen-loading-game" class="screen">
+      <div class="loading loading--center">
+        <div class="vinyl-spinner" aria-hidden="true"></div>
+        <p id="loading-game-text">Preparando tu partida&hellip;</p>
+      </div>
+    </section>
+
+    <!-- PANTALLA: JUEGO -->
+    <section id="screen-game" class="screen">
+      <header class="topbar">
+        <button class="btn btn--ghost btn--small" id="btn-quit-game">✕ Salir</button>
+        <div class="scoreboard">
+          <span class="scoreboard__item">Ronda <span id="round-current">1</span>/<span id="round-total">10</span></span>
+          <span class="scoreboard__divider">·</span>
+          <span class="scoreboard__item">Racha <span id="streak-count">0</span> 🔥</span>
+        </div>
+      </header>
+
+      <div class="game-stage">
+        <div class="vinyl" id="vinyl">
+          <div class="vinyl__center"></div>
+        </div>
+
+        <button class="btn btn--play" id="btn-play-fragment">
+          <span id="play-icon">▶</span>
+          <span id="play-label">Reproducir fragmento</span>
+        </button>
+
+        <p class="hint-text" id="hint-text" hidden></p>
+
+        <div class="options" id="options-grid"></div>
+
+        <div class="feedback" id="feedback" hidden>
+          <p class="feedback__text" id="feedback-text"></p>
+          <button class="btn btn--primary" id="btn-next-round">Siguiente ronda →</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- PANTALLA: RESULTADOS FINALES -->
+    <section id="screen-results" class="screen">
+      <div class="results">
+        <span class="brand__mark">★</span>
+        <h2 class="results__title">¡Partida terminada!</h2>
+        <p class="results__score" id="results-score">0 / 10</p>
+        <p class="results__streak" id="results-best-streak"></p>
+        <div class="results__actions">
+          <button class="btn btn--primary" id="btn-play-again">Jugar otra vez</button>
+          <button class="btn btn--ghost" id="btn-change-playlist">Cambiar de lista</button>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- Reproductor de YouTube oculto, usado solo para sonar el audio.
+       Se coloca fuera de la pantalla visible (en vez de opacity:0) porque
+       algunos navegadores tratan los iframes "invisibles" de forma más
+       estricta a la hora de permitir el sonido. -->
+  <div id="yt-player-container" style="position:fixed; top:-9999px; left:-9999px;">
+    <div id="yt-player"></div>
+  </div>
+
+  <script src="https://www.youtube.com/iframe_api"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
