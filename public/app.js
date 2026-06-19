@@ -246,6 +246,11 @@
     playBtn.onclick = () => playFragment(correctTrack._videoId);
   }
 
+  // Cuánto dura el fragmento que se escucha, y cuánto tiempo de margen se da
+  // antes de empezar a contar, para compensar el delay de carga de YouTube.
+  const FRAGMENT_DURATION_MS = 14000; // 14 segundos de fragmento
+  const LOAD_DELAY_MS = 1500; // margen antes de empezar a contar
+
   function playFragment(videoId) {
     if (!state.ytPlayerReady) {
       alert('El reproductor todavía se está cargando, espera un segundo e inténtalo de nuevo.');
@@ -268,7 +273,9 @@
     });
 
     // Algunos navegadores necesitan un playVideo() explícito tras loadVideoById
-    // para no quedarse pausados en el primer frame.
+    // para no quedarse pausados en el primer frame. Aprovechamos este mismo
+    // margen (LOAD_DELAY_MS) como "tiempo de carga" antes de empezar a contar
+    // los segundos de fragmento, así el usuario siempre oye los 14s completos.
     setTimeout(() => {
       if (state.ytPlayer && state.ytPlayer.playVideo) {
         state.ytPlayer.unMute();
@@ -282,7 +289,7 @@
       document.getElementById('vinyl').classList.remove('vinyl--spinning');
       playBtn.disabled = false;
       document.getElementById('play-label').textContent = 'Reproducir otra vez';
-    }, 8000); // 8 segundos de fragmento
+    }, LOAD_DELAY_MS + FRAGMENT_DURATION_MS);
   }
 
   // ------------------------------------------------------------------
