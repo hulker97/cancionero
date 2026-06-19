@@ -10,9 +10,9 @@
   // ------------------------------------------------------------------
   const state = {
     allTracks: [],      // todas las canciones de la playlist elegida
-    roundTracks: [],     // las canciones que se usarán en esta partida (mezcladas)
-    currentRoundIndex: 0,
-    totalRounds: 10,
+    roundNumber: 0,      // ronda actual (sube indefinidamente, no hay límite)
+    currentTrack: null,  // canción de la ronda actual
+    lastTrackId: null,   // para evitar que salga la misma canción dos veces seguidas
     score: 0,
     streak: 0,
     bestStreak: 0,
@@ -119,36 +119,80 @@
   }
 
   // ------------------------------------------------------------------
+  // Caché ligera en localStorage: evita volver a pedir las mismas
+  // canciones o las mismas búsquedas de YouTube. Persiste aunque cierres
+  // la app del todo (a diferencia de sessionStorage), hasta que limpies
+  // datos del navegador o expire por tiempo (solo aplica a playlists).
+  // ------------------------------------------------------------------
+  const CACHE_PREFIX = 'cancionero_cache_';
+  const TRACKS_CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutos
+
+  function getCache(key) {
+    try {
+      const raw = localStorage.getItem(CACHE_PREFIX + key);
+      if (!raw) return null;
+      const { value, expiresAt } = JSON.parse(raw);
+      if (expiresAt && Date.now() > expiresAt) {
+        localStorage.removeItem(CACHE_PREFIX + key);
+        return null;
+      }
+      return value;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function setCache(key, value, ttlMs) {
+    try {
+      const entry = { value, expiresAt: ttlMs ? Date.now() + ttlMs : null };
+      localStorage.setItem(CACHE_PREFIX + key, JSON.stringify(entry));
+    } catch (e) {
+      // Si localStorage está lleno o no disponible, simplemente no cacheamos.
+    }
+  }
+
+  // ------------------------------------------------------------------
   // Empezar partida con una playlist concreta
   // ------------------------------------------------------------------
   async function startGameWithPlaylist(playlistId) {
     showScreen('screen-loading-game');
-    document.getElementById('loading-game-text').textContent = 'Cargando canciones de tu lista…';
 
-    try {
-      const res = await fetch(`/api/tracks/${encodeURIComponent(playlistId)}`);
-      const data = await res.json();
+    const cacheKey = `tracks_${playlistId}`;
+    const cached = getCache(cacheKey);
 
-      if (!data.tracks || data.tracks.length < 4) {
-        alert('Esta lista necesita al menos 4 canciones distintas para poder jugar. Elige otra.');
+    let tracks;
+    if (cached) {
+      tracks = cached;
+    } else {
+      document.getElementById('loading-game-text').textContent = 'Cargando canciones de tu lista…';
+      try {
+        const res = await fetch(`/api/tracks/${encodeURIComponent(playlistId)}`);
+        const data = await res.json();
+        tracks = data.tracks;
+        if (tracks && tracks.length >= 4) {
+          setCache(cacheKey, tracks, TRACKS_CACHE_TTL_MS);
+        }
+      } catch (e) {
+        alert('Ha ocurrido un error cargando las canciones. Vuelve a intentarlo.');
         await loadPlaylists();
         return;
       }
-
-      state.allTracks = data.tracks;
-      state.totalRounds = Math.min(10, data.tracks.length);
-      state.roundTracks = pickRandom(data.tracks, state.totalRounds);
-      state.currentRoundIndex = 0;
-      state.score = 0;
-      state.streak = 0;
-      state.bestStreak = 0;
-
-      document.getElementById('round-total').textContent = state.totalRounds;
-      playRound();
-    } catch (e) {
-      alert('Ha ocurrido un error cargando las canciones. Vuelve a intentarlo.');
-      await loadPlaylists();
     }
+
+    if (!tracks || tracks.length < 4) {
+      alert('Esta lista necesita al menos 4 canciones distintas para poder jugar. Elige otra.');
+      await loadPlaylists();
+      return;
+    }
+
+    state.allTracks = tracks;
+    state.roundNumber = 0;
+    state.lastTrackId = null;
+    state.score = 0;
+    state.streak = 0;
+    state.bestStreak = 0;
+
+    playRound();
   }
 
   // ------------------------------------------------------------------
@@ -181,7 +225,15 @@
     showScreen('screen-loading-game');
     document.getElementById('loading-game-text').textContent = 'Buscando la canción…';
 
-    const correctTrack = state.roundTracks[state.currentRoundIndex];
+    // Elegimos una canción al azar de toda la librería, evitando repetir
+    // la misma que justo en la ronda anterior (si hay más de una canción disponible).
+    let candidates = state.allTracks;
+    if (state.lastTrackId && state.allTracks.length > 1) {
+      candidates = state.allTracks.filter((t) => t.id !== state.lastTrackId);
+    }
+    const correctTrack = candidates[Math.floor(Math.random() * candidates.length)];
+    state.lastTrackId = correctTrack.id;
+    state.roundNumber += 1;
 
     // Generamos 4 opciones: la correcta + 3 distractores al azar del resto de la librería
     const distractorsPool = state.allTracks.filter((t) => t.id !== correctTrack.id);
@@ -190,21 +242,31 @@
 
     state.currentOptions = options;
     state.currentCorrectId = correctTrack.id;
+    state.currentTrack = correctTrack;
     state.answered = false;
 
-    // Buscamos el vídeo de YouTube correspondiente
-    try {
-      const res = await fetch(
-        `/api/youtube-search?song=${encodeURIComponent(correctTrack.name)}&artist=${encodeURIComponent(correctTrack.artist)}`
-      );
-      if (!res.ok) throw new Error('No encontrado');
-      const ytData = await res.json();
-      correctTrack._videoId = ytData.videoId;
-    } catch (e) {
-      // Si no se encuentra el vídeo, saltamos esta ronda y vamos a la siguiente
-      console.warn('No se encontró vídeo para', correctTrack.name, '- saltando ronda');
-      advanceRound(true /* skip */);
-      return;
+    // Buscamos el vídeo de YouTube correspondiente (con caché en el navegador,
+    // para no repetir la búsqueda si esta canción ya salió antes en la sesión)
+    const ytCacheKey = `yt_${correctTrack.artist}_${correctTrack.name}`.toLowerCase();
+    const cachedYt = getCache(ytCacheKey);
+
+    if (cachedYt) {
+      correctTrack._videoId = cachedYt.videoId;
+    } else {
+      try {
+        const res = await fetch(
+          `/api/youtube-search?song=${encodeURIComponent(correctTrack.name)}&artist=${encodeURIComponent(correctTrack.artist)}`
+        );
+        if (!res.ok) throw new Error('No encontrado');
+        const ytData = await res.json();
+        correctTrack._videoId = ytData.videoId;
+        setCache(ytCacheKey, ytData, null); // sin expiración: el vídeo de una canción no cambia
+      } catch (e) {
+        // Si no se encuentra el vídeo, saltamos esta ronda y vamos a la siguiente
+        console.warn('No se encontró vídeo para', correctTrack.name, '- saltando ronda');
+        playRound();
+        return;
+      }
     }
 
     renderRound(correctTrack, options);
@@ -212,7 +274,7 @@
   }
 
   function renderRound(correctTrack, options) {
-    document.getElementById('round-current').textContent = state.currentRoundIndex + 1;
+    document.getElementById('round-current').textContent = state.roundNumber;
     document.getElementById('streak-count').textContent = state.streak;
 
     const optionsGrid = document.getElementById('options-grid');
@@ -267,6 +329,26 @@
     state.ytPlayer.unMute();
     state.ytPlayer.setVolume(100);
 
+    // Sobrescribimos lo que Android/Chrome muestra en la notificación de
+    // "reproduciendo audio" con un título genérico, para que no se vea el
+    // nombre real de la canción (si no, sería trampa al jugar).
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: 'Cancionero',
+        artist: '¿Qué canción es?',
+        album: '🎵 Ronda en curso',
+      });
+      navigator.mediaSession.playbackState = 'playing';
+      // Desactivamos los botones de "siguiente/anterior" de la notificación,
+      // que no tienen sentido aquí y podrían confundir.
+      try {
+        navigator.mediaSession.setActionHandler('previoustrack', null);
+        navigator.mediaSession.setActionHandler('nexttrack', null);
+      } catch (e) {
+        // Algunos navegadores no soportan desactivar estas acciones; no pasa nada.
+      }
+    }
+
     state.ytPlayer.loadVideoById({
       videoId,
       startSeconds: state.fragmentStartSeconds,
@@ -280,6 +362,15 @@
       if (state.ytPlayer && state.ytPlayer.playVideo) {
         state.ytPlayer.unMute();
         state.ytPlayer.playVideo();
+        // Reforzamos el título genérico otra vez aquí, porque algunos
+        // navegadores reaplican los metadatos del iframe al empezar a sonar.
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: 'Cancionero',
+            artist: '¿Qué canción es?',
+            album: '🎵 Ronda en curso',
+          });
+        }
       }
     }, 250);
 
@@ -289,6 +380,9 @@
       document.getElementById('vinyl').classList.remove('vinyl--spinning');
       playBtn.disabled = false;
       document.getElementById('play-label').textContent = 'Reproducir otra vez';
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.playbackState = 'paused';
+      }
     }, LOAD_DELAY_MS + FRAGMENT_DURATION_MS);
   }
 
@@ -332,26 +426,31 @@
       : 'Fallaste, ¡a por la siguiente!';
     feedback.hidden = false;
 
-    document.getElementById('btn-next-round').onclick = () => advanceRound(false);
+    document.getElementById('btn-next-round').onclick = () => advanceRound();
   }
 
-  function advanceRound(skip) {
-    state.currentRoundIndex += 1;
-    if (state.currentRoundIndex >= state.roundTracks.length) {
-      showResults();
-    } else {
-      playRound();
-    }
+  function advanceRound() {
+    playRound();
   }
 
   // ------------------------------------------------------------------
-  // Pantalla de resultados
+  // Pantalla de resumen (se muestra al pulsar "Salir" durante una partida)
   // ------------------------------------------------------------------
   function showResults() {
-    document.getElementById('results-score').textContent = `${state.score} / ${state.totalRounds}`;
+    document.getElementById('results-score').textContent =
+      `${state.score} aciertos en ${state.roundNumber} rondas`;
     document.getElementById('results-best-streak').textContent =
       state.bestStreak > 1 ? `Mejor racha: ${state.bestStreak} 🔥` : '';
     showScreen('screen-results');
+  }
+
+  function stopPlaybackAndClearMediaSession() {
+    clearTimeout(state.fragmentTimer);
+    if (state.ytPlayer && state.ytPlayer.pauseVideo) state.ytPlayer.pauseVideo();
+    document.getElementById('vinyl').classList.remove('vinyl--spinning');
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = 'none';
+    }
   }
 
   // ------------------------------------------------------------------
@@ -362,14 +461,13 @@
   });
 
   document.getElementById('btn-quit-game').addEventListener('click', () => {
-    clearTimeout(state.fragmentTimer);
-    if (state.ytPlayer && state.ytPlayer.pauseVideo) state.ytPlayer.pauseVideo();
-    loadPlaylists();
+    stopPlaybackAndClearMediaSession();
+    showResults();
   });
 
   document.getElementById('btn-play-again').addEventListener('click', () => {
-    state.roundTracks = pickRandom(state.allTracks, state.totalRounds);
-    state.currentRoundIndex = 0;
+    state.roundNumber = 0;
+    state.lastTrackId = null;
     state.score = 0;
     state.streak = 0;
     state.bestStreak = 0;
