@@ -258,6 +258,7 @@ app.get('/api/playlists', requireAuth, async (req, res) => {
     res.status(500).json({ error: 'No se han podido cargar las playlists' });
   }
 });
+
 // ---------------------------------------------------------------------------
 // API: obtener las canciones de una playlist (o de "liked songs")
 // ---------------------------------------------------------------------------
@@ -294,7 +295,7 @@ app.get('/api/tracks/:playlistId', requireAuth, async (req, res) => {
           image: t.album?.images?.[0]?.url || null,
         }));
 
-     tracks = tracks.concat(items);
+      tracks = tracks.concat(items);
       pageCount += 1;
       url = data.next;
 
