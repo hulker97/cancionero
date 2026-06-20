@@ -5,9 +5,6 @@
 (() => {
   'use strict';
 
-  // ------------------------------------------------------------------
-  // Estado global del juego
-  // ------------------------------------------------------------------
   const state = {
     allTracks: [],
     roundNumber: 0,
@@ -25,9 +22,6 @@
     answered: false,
   };
 
-  // ------------------------------------------------------------------
-  // Utilidades de navegación entre pantallas
-  // ------------------------------------------------------------------
   function showScreen(id) {
     document.querySelectorAll('.screen').forEach((el) => el.classList.remove('screen--active'));
     document.getElementById(id).classList.add('screen--active');
@@ -46,9 +40,6 @@
     return shuffle(array).slice(0, n);
   }
 
-  // ------------------------------------------------------------------
-  // Arranque: comprobar si ya hay sesión iniciada
-  // ------------------------------------------------------------------
   async function init() {
     const params = new URLSearchParams(window.location.search);
     const error = params.get('error');
@@ -71,9 +62,6 @@
     }
   }
 
-  // ------------------------------------------------------------------
-  // Cargar playlists del usuario
-  // ------------------------------------------------------------------
   async function loadPlaylists() {
     showScreen('screen-playlists');
     const loadingEl = document.getElementById('playlists-loading');
@@ -118,9 +106,6 @@
     return div.innerHTML;
   }
 
-  // ------------------------------------------------------------------
-  // Caché ligera en localStorage
-  // ------------------------------------------------------------------
   const CACHE_PREFIX = 'cancionero_cache_';
   const TRACKS_CACHE_TTL_MS = 30 * 60 * 1000;
 
@@ -148,9 +133,6 @@
     }
   }
 
-  // ------------------------------------------------------------------
-  // Empezar partida con una playlist concreta (de tu cuenta de Spotify)
-  // ------------------------------------------------------------------
   async function startGameWithPlaylist(playlistId) {
     showScreen('screen-loading-game');
 
@@ -179,10 +161,6 @@
     beginGameSession(tracks, loadPlaylists);
   }
 
-  // ------------------------------------------------------------------
-  // Empezar partida a partir de un link pegado (Spotify público, YouTube
-  // o YouTube Music). No requiere haber iniciado sesión con nada.
-  // ------------------------------------------------------------------
   function detectLinkType(link) {
     const lower = link.toLowerCase();
     if (lower.includes('open.spotify.com/playlist') || lower.includes('spotify:playlist:')) {
@@ -195,13 +173,20 @@
   }
 
   async function startGameWithLink(link) {
-    const errEl = document.getElementById('link-error');
-    errEl.hidden = true;
+    const errEls = [document.getElementById('link-error'), document.getElementById('link-error-2')]
+      .filter(Boolean);
+    errEls.forEach((el) => (el.hidden = true));
+
+    function showLinkError(message) {
+      errEls.forEach((el) => {
+        el.hidden = false;
+        el.textContent = message;
+      });
+    }
 
     const type = detectLinkType(link);
     if (!type) {
-      errEl.hidden = false;
-      errEl.textContent = 'No reconozco ese link. Usa un link de playlist de Spotify, YouTube o YouTube Music.';
+      showLinkError('No reconozco ese link. Usa un link de playlist de Spotify, YouTube o YouTube Music.');
       return;
     }
 
@@ -224,9 +209,8 @@
         const data = await res.json();
 
         if (!res.ok) {
-          showScreen('screen-login');
-          errEl.hidden = false;
-          errEl.textContent = data.error || 'No se ha podido cargar esa lista.';
+          await goBackFromLinkError();
+          showLinkError(data.error || 'No se ha podido cargar esa lista.');
           return;
         }
 
@@ -235,26 +219,35 @@
           setCache(cacheKey, tracks, TRACKS_CACHE_TTL_MS);
         }
       } catch (e) {
-        showScreen('screen-login');
-        errEl.hidden = false;
-        errEl.textContent = 'Ha ocurrido un error cargando esa lista. Inténtalo de nuevo.';
+        await goBackFromLinkError();
+        showLinkError('Ha ocurrido un error cargando esa lista. Inténtalo de nuevo.');
         return;
       }
     }
 
     if (!tracks || tracks.length < 4) {
-      showScreen('screen-login');
-      errEl.hidden = false;
-      errEl.textContent = 'Esa lista necesita al menos 4 canciones distintas para poder jugar.';
+      await goBackFromLinkError();
+      showLinkError('Esa lista necesita al menos 4 canciones distintas para poder jugar.');
       return;
     }
 
-    beginGameSession(tracks, () => showScreen('screen-login'));
+    beginGameSession(tracks, async () => await goBackFromLinkError());
   }
 
-  // ------------------------------------------------------------------
-  // Inicializa el estado de una nueva sesión de juego
-  // ------------------------------------------------------------------
+  async function goBackFromLinkError() {
+    try {
+      const res = await fetch('/api/auth-status');
+      const data = await res.json();
+      if (data.loggedIn) {
+        await loadPlaylists();
+        return;
+      }
+    } catch (e) {
+      // sigue abajo
+    }
+    showScreen('screen-login');
+  }
+
   function beginGameSession(tracks, onBackFn) {
     if (!tracks || tracks.length < 4) {
       alert('Esta lista necesita al menos 4 canciones distintas para poder jugar. Elige otra.');
@@ -272,9 +265,6 @@
     playRound();
   }
 
-  // ------------------------------------------------------------------
-  // Reproductor de YouTube (API oficial embebida)
-  // ------------------------------------------------------------------
   window.onYouTubeIframeAPIReady = function () {
     state.ytPlayer = new YT.Player('yt-player', {
       height: '1',
@@ -293,9 +283,6 @@
     });
   };
 
-  // ------------------------------------------------------------------
-  // Jugar una ronda
-  // ------------------------------------------------------------------
   async function playRound() {
     showScreen('screen-loading-game');
     document.getElementById('loading-game-text').textContent = 'Buscando la canción…';
@@ -317,9 +304,6 @@
     state.currentTrack = correctTrack;
     state.answered = false;
 
-    // Buscamos el vídeo de YouTube correspondiente. Si la canción ya viene
-    // de una playlist de YouTube/YouTube Music, el videoId ya lo tenemos
-    // directamente y nos ahorramos la búsqueda.
     if (!correctTrack._videoId) {
       const ytCacheKey = `yt_${correctTrack.artist}_${correctTrack.name}`.toLowerCase();
       const cachedYt = getCache(ytCacheKey);
@@ -443,9 +427,6 @@
     }, LOAD_DELAY_MS + FRAGMENT_DURATION_MS);
   }
 
-  // ------------------------------------------------------------------
-  // Gestionar respuesta del usuario
-  // ------------------------------------------------------------------
   function handleAnswer(chosenId, btnEl) {
     if (state.answered) return;
     state.answered = true;
@@ -489,9 +470,6 @@
     playRound();
   }
 
-  // ------------------------------------------------------------------
-  // Pantalla de resumen
-  // ------------------------------------------------------------------
   function showResults() {
     document.getElementById('results-score').textContent =
       `${state.score} aciertos en ${state.roundNumber} rondas`;
@@ -509,9 +487,6 @@
     }
   }
 
-  // ------------------------------------------------------------------
-  // Listeners de botones generales
-  // ------------------------------------------------------------------
   document.getElementById('btn-logout').addEventListener('click', () => {
     window.location.href = '/logout';
   });
@@ -559,6 +534,24 @@
   document.getElementById('playlist-link-input').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') {
       document.getElementById('btn-load-link').click();
+    }
+  });
+
+  document.getElementById('btn-load-link-2').addEventListener('click', () => {
+    const input = document.getElementById('playlist-link-input-2');
+    const link = input.value.trim();
+    if (!link) {
+      const errEl = document.getElementById('link-error-2');
+      errEl.hidden = false;
+      errEl.textContent = 'Pega antes un link de una playlist.';
+      return;
+    }
+    startGameWithLink(link);
+  });
+
+  document.getElementById('playlist-link-input-2').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      document.getElementById('btn-load-link-2').click();
     }
   });
 
