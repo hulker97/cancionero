@@ -226,27 +226,45 @@ app.get('/api/auth-status', (req, res) => {
 // API: listar playlists del usuario
 // ---------------------------------------------------------------------------
 
-app.get('/api/playlists', requireAuth, async (req, res) => {
+app.get('/api/tracks/:playlistId', requireAuth, async (req, res) => {
+  const { playlistId } = req.params;
   try {
-    let playlists = [];
-    let url = 'https://api.spotify.com/v1/me/playlists?limit=50';
+    let tracks = [];
+    let url;
+    const isLiked = playlistId === 'liked';
+    const MAX_PAGES_LIKED = 3; // 3 páginas x 100 = 300 canciones como máximo
 
+    if (isLiked) {
+      url = 'https://api.spotify.com/v1/me/tracks?limit=100';
+    } else {
+      url = `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100`;
+    }
+
+    let pageCount = 0;
     while (url) {
       const { data } = await axios.get(url, {
         headers: { Authorization: `Bearer ${req.spotifyToken}` },
       });
-      playlists = playlists.concat(
-        data.items
-          .filter((p) => p && p.tracks?.total > 0)
-          .map((p) => ({
-            id: p.id,
-            name: p.name,
-            image: p.images?.[0]?.url || null,
-            trackCount: p.tracks.total,
-            owner: p.owner?.display_name,
-          }))
-      );
+
+      const items = data.items
+        .map((item) => item.track)
+        .filter((t) => t && t.id && t.name)
+        .map((t) => ({
+          id: t.id,
+          name: t.name,
+          artist: t.artists.map((a) => a.name).join(', '),
+          album: t.album?.name,
+          durationMs: t.duration_ms,
+          image: t.album?.images?.[0]?.url || null,
+        }));
+
+      tracks = tracks.concat(items);
+      pageCount += 1;
       url = data.next;
+
+      if (isLiked && pageCount >= MAX_PAGES_LIKED) {
+        url = null;
+      }
     }
 
     res.json({
