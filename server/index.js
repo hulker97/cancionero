@@ -150,6 +150,12 @@ async function getValidAccessToken(req) {
 }
 
 async function requireAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    req.spotifyToken = authHeader.slice('Bearer '.length);
+    return next();
+  }
+
   const token = await getValidAccessToken(req);
   if (!token) {
     return res.status(401).json({ error: 'No has iniciado sesión con Spotify' });
