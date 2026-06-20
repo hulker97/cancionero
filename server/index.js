@@ -21,7 +21,6 @@ const {
   SESSION_SECRET,
 } = process.env;
 
-// Avisos claros si falta configuración, para que sea fácil depurar.
 if (!SPOTIFY_CLIENT_ID || !SPOTIFY_CLIENT_SECRET) {
   console.warn('[AVISO] Falta SPOTIFY_CLIENT_ID o SPOTIFY_CLIENT_SECRET en el .env');
 }
@@ -34,12 +33,11 @@ app.use(
   cookieSession({
     name: 'cancionero_session',
     keys: [SESSION_SECRET || 'fallback-secret-no-usar-en-produccion'],
-    maxAge: 24 * 60 * 60 * 1000, // 24 horas
+    maxAge: 24 * 60 * 60 * 1000,
     sameSite: 'lax',
   })
 );
 
-// Servimos los archivos estáticos del frontend (carpeta /public)
 app.use(express.static(path.join(__dirname, '..', 'public')));
 
 // ---------------------------------------------------------------------------
@@ -53,7 +51,6 @@ const SPOTIFY_SCOPES = [
   'user-library-read',
 ].join(' ');
 
-// Paso 1: el usuario hace clic en "Conectar con Spotify" -> le mandamos aquí
 app.get('/login', (req, res) => {
   const state = crypto.randomBytes(16).toString('hex');
   req.session.oauthState = state;
@@ -69,7 +66,6 @@ app.get('/login', (req, res) => {
   res.redirect(`https://accounts.spotify.com/authorize?${params.toString()}`);
 });
 
-// Paso 2: Spotify redirige aquí de vuelta con un "code" que canjeamos por tokens
 app.get('/callback', async (req, res) => {
   const { code, state, error } = req.query;
 
@@ -117,7 +113,6 @@ app.get('/logout', (req, res) => {
   res.redirect('/');
 });
 
-// Refresca el access token de Spotify usando el refresh token guardado en sesión
 async function refreshSpotifyToken(req) {
   if (!req.session.spotifyRefreshToken) return null;
 
@@ -142,7 +137,6 @@ async function refreshSpotifyToken(req) {
   return response.data.access_token;
 }
 
-// Helper: obtiene un access token válido, refrescándolo si ha caducado
 async function getValidAccessToken(req) {
   if (!req.session.spotifyAccessToken) return null;
 
@@ -155,7 +149,6 @@ async function getValidAccessToken(req) {
   return req.session.spotifyAccessToken;
 }
 
-// Middleware para rutas que requieren estar logueado
 async function requireAuth(req, res, next) {
   const token = await getValidAccessToken(req);
   if (!token) {
@@ -163,6 +156,44 @@ async function requireAuth(req, res, next) {
   }
   req.spotifyToken = token;
   next();
+}
+
+// ---------------------------------------------------------------------------
+// Client Credentials de Spotify: token "de la app", sin usuario.
+// Solo sirve para leer datos PÚBLICOS (como una playlist pública por su ID),
+// nunca para datos privados de una cuenta concreta. Así cualquiera puede
+// pegar el link de una playlist pública sin tener que iniciar sesión.
+// ---------------------------------------------------------------------------
+let appAccessToken = null;
+let appAccessTokenExpiresAt = 0;
+
+async function getAppAccessToken() {
+  if (appAccessToken && Date.now() < appAccessTokenExpiresAt - 5000) {
+    return appAccessToken;
+  }
+  const response = await axios.post(
+    'https://accounts.spotify.com/api/token',
+    new URLSearchParams({ grant_type: 'client_credentials' }).toString(),
+    {
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        Authorization:
+          'Basic ' +
+          Buffer.from(`${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`).toString('base64'),
+      },
+    }
+  );
+  appAccessToken = response.data.access_token;
+  appAccessTokenExpiresAt = Date.now() + response.data.expires_in * 1000;
+  return appAccessToken;
+}
+
+function extractSpotifyPlaylistId(input) {
+  const trimmed = input.trim();
+  const urlMatch = trimmed.match(/playlist[/:]([a-zA-Z0-9]+)/);
+  if (urlMatch) return urlMatch[1];
+  if (/^[a-zA-Z0-9]{10,}$/.test(trimmed)) return trimmed;
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -212,7 +243,6 @@ app.get('/api/playlists', requireAuth, async (req, res) => {
       url = data.next;
     }
 
-    // Añadimos también "Tus canciones guardadas" como opción especial
     res.json({
       playlists,
       special: [{ id: 'liked', name: 'Tus canciones guardadas', image: null }],
@@ -246,7 +276,7 @@ app.get('/api/tracks/:playlistId', requireAuth, async (req, res) => {
 
       const items = data.items
         .map((item) => item.track)
-        .filter((t) => t && t.id && t.name) // descarta vídeos/episodios borrados o locales
+        .filter((t) => t && t.id && t.name)
         .map((t) => ({
           id: t.id,
           name: t.name,
@@ -260,7 +290,6 @@ app.get('/api/tracks/:playlistId', requireAuth, async (req, res) => {
       url = data.next;
     }
 
-    // Quitamos duplicados (misma canción puede aparecer varias veces)
     const seen = new Set();
     tracks = tracks.filter((t) => {
       const key = `${t.name.toLowerCase()}-${t.artist.toLowerCase()}`;
@@ -277,10 +306,153 @@ app.get('/api/tracks/:playlistId', requireAuth, async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// API: leer una playlist PÚBLICA de Spotify a partir de su link, sin login.
+// Usa Client Credentials (token de la app, no de un usuario concreto).
+// ---------------------------------------------------------------------------
+
+app.get('/api/public-spotify-tracks', async (req, res) => {
+  const { url: playlistUrl } = req.query;
+  if (!playlistUrl) {
+    return res.status(400).json({ error: 'Falta el parámetro url' });
+  }
+
+  const playlistId = extractSpotifyPlaylistId(playlistUrl);
+  if (!playlistId) {
+    return res.status(400).json({ error: 'No se ha reconocido un ID de playlist de Spotify en ese link' });
+  }
+
+  try {
+    const token = await getAppAccessToken();
+    let tracks = [];
+    let url = `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100`;
+
+    while (url) {
+      const { data } = await axios.get(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const items = data.items
+        .map((item) => item.track)
+        .filter((t) => t && t.id && t.name)
+        .map((t) => ({
+          id: t.id,
+          name: t.name,
+          artist: t.artists.map((a) => a.name).join(', '),
+          album: t.album?.name,
+          durationMs: t.duration_ms,
+          image: t.album?.images?.[0]?.url || null,
+        }));
+
+      tracks = tracks.concat(items);
+      url = data.next;
+    }
+
+    const seen = new Set();
+    tracks = tracks.filter((t) => {
+      const key = `${t.name.toLowerCase()}-${t.artist.toLowerCase()}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    res.json({ tracks });
+  } catch (err) {
+    console.error('Error en /api/public-spotify-tracks:', err.response?.data || err.message);
+    if (err.response?.status === 404) {
+      return res.status(404).json({ error: 'No se ha encontrado esa playlist. ¿Es pública?' });
+    }
+    res.status(500).json({ error: 'No se han podido cargar las canciones de esa playlist' });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// API: leer una playlist de YouTube o YouTube Music a partir de su link.
+// No requiere login, solo la API key del servidor.
+// ---------------------------------------------------------------------------
+
+function extractYoutubePlaylistId(input) {
+  const trimmed = input.trim();
+  const match = trimmed.match(/[?&]list=([a-zA-Z0-9_-]+)/);
+  if (match) return match[1];
+  if (/^[a-zA-Z0-9_-]{10,}$/.test(trimmed)) return trimmed;
+  return null;
+}
+
+app.get('/api/youtube-playlist-tracks', async (req, res) => {
+  const { url: playlistUrl } = req.query;
+  if (!playlistUrl) {
+    return res.status(400).json({ error: 'Falta el parámetro url' });
+  }
+  if (!YOUTUBE_API_KEY) {
+    return res.status(500).json({ error: 'El servidor no tiene configurada YOUTUBE_API_KEY' });
+  }
+
+  const playlistId = extractYoutubePlaylistId(playlistUrl);
+  if (!playlistId) {
+    return res.status(400).json({ error: 'No se ha reconocido un ID de playlist de YouTube en ese link' });
+  }
+
+  try {
+    let tracks = [];
+    let pageToken = '';
+
+    do {
+      const { data } = await axios.get('https://www.googleapis.com/youtube/v3/playlistItems', {
+        params: {
+          key: YOUTUBE_API_KEY,
+          playlistId,
+          part: 'snippet,contentDetails',
+          maxResults: 50,
+          pageToken: pageToken || undefined,
+        },
+      });
+
+      const items = (data.items || [])
+        .filter((item) => item.contentDetails?.videoId && item.snippet?.title !== 'Deleted video' && item.snippet?.title !== 'Private video')
+        .map((item) => {
+          const rawTitle = item.snippet.title;
+          const channelTitle = item.snippet.videoOwnerChannelTitle || item.snippet.channelTitle || '';
+          let name = rawTitle;
+          let artist = channelTitle.replace(/\s*-\s*Topic$/i, '').trim();
+
+          const dashSplit = rawTitle.split(' - ');
+          if (dashSplit.length >= 2) {
+            artist = dashSplit[0].trim();
+            name = dashSplit.slice(1).join(' - ').trim();
+          }
+
+          return {
+            id: item.contentDetails.videoId,
+            name,
+            artist: artist || 'Desconocido',
+            durationMs: null,
+            image: item.snippet.thumbnails?.high?.url || item.snippet.thumbnails?.default?.url || null,
+            _videoId: item.contentDetails.videoId,
+          };
+        });
+
+      tracks = tracks.concat(items);
+      pageToken = data.nextPageToken || '';
+    } while (pageToken);
+
+    if (tracks.length === 0) {
+      return res.status(404).json({ error: 'No se han encontrado canciones en esa playlist. ¿Es pública?' });
+    }
+
+    res.json({ tracks });
+  } catch (err) {
+    console.error('Error en /api/youtube-playlist-tracks:', err.response?.data || err.message);
+    if (err.response?.status === 404) {
+      return res.status(404).json({ error: 'No se ha encontrado esa playlist. ¿Es pública?' });
+    }
+    res.status(500).json({ error: 'No se han podido cargar las canciones de esa playlist' });
+  }
+});
+
+// ---------------------------------------------------------------------------
 // API: buscar el vídeo de YouTube correspondiente a una canción
 // ---------------------------------------------------------------------------
 
-// Caché simple en memoria para no repetir búsquedas de la misma canción
 const youtubeCache = new Map();
 
 app.get('/api/youtube-search', async (req, res) => {
@@ -328,7 +500,6 @@ app.get('/api/youtube-search', async (req, res) => {
   }
 });
 
-// Cualquier otra ruta -> servimos el index.html (SPA simple)
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
