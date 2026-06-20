@@ -314,8 +314,12 @@ app.get('/api/tracks/:playlistId', requireAuth, async (req, res) => {
 
     res.json({ tracks });
   } catch (err) {
-    console.error('Error en /api/tracks:', err.response?.data || err.message);
-    res.status(500).json({ error: 'No se han podido cargar las canciones' });
+    console.error('Error en /api/tracks:', err.response?.status, err.response?.data || err.message);
+    res.status(500).json({
+      error: 'No se han podido cargar las canciones',
+      debug: err.response?.data || err.message,
+      status: err.response?.status,
+    });
   }
 });
 
