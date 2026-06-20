@@ -58,6 +58,24 @@
         <h2 class="topbar__title">Elige una lista</h2>
         <button class="btn btn--ghost btn--small" id="btn-logout">Salir</button>
       </header>
+
+      <div class="card card--compact">
+        <p class="card__text card__text--compact">
+          ¿Quieres usar otra playlist (Spotify, YouTube o YouTube Music)? Pega el link aquí:
+        </p>
+        <div class="link-row">
+          <input
+            type="text"
+            id="playlist-link-input-2"
+            class="text-input"
+            placeholder="https://open.spotify.com/playlist/..."
+          />
+          <button class="btn btn--primary btn--small" id="btn-load-link-2">Cargar</button>
+        </div>
+        <p id="link-error-2" class="error-text" hidden></p>
+      </div>
+
+      <p class="section-label">Tus listas</p>
       <div id="playlists-loading" class="loading">Cargando tus listas&hellip;</div>
       <div id="playlists-grid" class="playlist-grid" hidden></div>
     </section>
