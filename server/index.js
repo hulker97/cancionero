@@ -272,7 +272,7 @@ app.get('/api/tracks/:playlistId', requireAuth, async (req, res) => {
     const MAX_PAGES_LIKED = 3;
 
     if (isLiked) {
-      url = 'https://api.spotify.com/v1/me/tracks?limit=100';
+      url = 'https://api.spotify.com/v1/me/tracks?limit=50';
     } else {
       url = `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100`;
     }
