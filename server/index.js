@@ -268,16 +268,13 @@ app.get('/api/tracks/:playlistId', requireAuth, async (req, res) => {
   try {
     let tracks = [];
     let url;
-    const isLiked = playlistId === 'liked';
-    const MAX_PAGES_LIKED = 3;
 
-    if (isLiked) {
+    if (playlistId === 'liked') {
       url = 'https://api.spotify.com/v1/me/tracks?limit=50';
     } else {
       url = `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100`;
     }
 
-    let pageCount = 0;
     while (url) {
       const { data } = await axios.get(url, {
         headers: { Authorization: `Bearer ${req.spotifyToken}` },
@@ -296,12 +293,7 @@ app.get('/api/tracks/:playlistId', requireAuth, async (req, res) => {
         }));
 
       tracks = tracks.concat(items);
-      pageCount += 1;
       url = data.next;
-
-      if (isLiked && pageCount >= MAX_PAGES_LIKED) {
-        url = null;
-      }
     }
 
     const seen = new Set();
@@ -314,12 +306,8 @@ app.get('/api/tracks/:playlistId', requireAuth, async (req, res) => {
 
     res.json({ tracks });
   } catch (err) {
-    console.error('Error en /api/tracks:', err.response?.status, err.response?.data || err.message);
-    res.status(500).json({
-      error: 'No se han podido cargar las canciones',
-      debug: err.response?.data || err.message,
-      status: err.response?.status,
-    });
+    console.error('Error en /api/tracks:', err.response?.data || err.message);
+    res.status(500).json({ error: 'No se han podido cargar las canciones' });
   }
 });
 
