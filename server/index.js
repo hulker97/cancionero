@@ -226,13 +226,49 @@ app.get('/api/auth-status', (req, res) => {
 // API: listar playlists del usuario
 // ---------------------------------------------------------------------------
 
+app.get('/api/playlists', requireAuth, async (req, res) => {
+  try {
+    let playlists = [];
+    let url = 'https://api.spotify.com/v1/me/playlists?limit=50';
+
+    while (url) {
+      const { data } = await axios.get(url, {
+        headers: { Authorization: `Bearer ${req.spotifyToken}` },
+      });
+      playlists = playlists.concat(
+        data.items
+          .filter((p) => p && p.tracks?.total > 0)
+          .map((p) => ({
+            id: p.id,
+            name: p.name,
+            image: p.images?.[0]?.url || null,
+            trackCount: p.tracks.total,
+            owner: p.owner?.display_name,
+          }))
+      );
+      url = data.next;
+    }
+
+    res.json({
+      playlists,
+      special: [{ id: 'liked', name: 'Tus canciones guardadas', image: null }],
+    });
+  } catch (err) {
+    console.error('Error en /api/playlists:', err.response?.data || err.message);
+    res.status(500).json({ error: 'No se han podido cargar las playlists' });
+  }
+});
+// ---------------------------------------------------------------------------
+// API: obtener las canciones de una playlist (o de "liked songs")
+// ---------------------------------------------------------------------------
+
 app.get('/api/tracks/:playlistId', requireAuth, async (req, res) => {
   const { playlistId } = req.params;
   try {
     let tracks = [];
     let url;
     const isLiked = playlistId === 'liked';
-    const MAX_PAGES_LIKED = 3; // 3 páginas x 100 = 300 canciones como máximo
+    const MAX_PAGES_LIKED = 3;
 
     if (isLiked) {
       url = 'https://api.spotify.com/v1/me/tracks?limit=100';
@@ -258,60 +294,13 @@ app.get('/api/tracks/:playlistId', requireAuth, async (req, res) => {
           image: t.album?.images?.[0]?.url || null,
         }));
 
-      tracks = tracks.concat(items);
+     tracks = tracks.concat(items);
       pageCount += 1;
       url = data.next;
 
       if (isLiked && pageCount >= MAX_PAGES_LIKED) {
         url = null;
       }
-    }
-
-    res.json({
-      playlists,
-      special: [{ id: 'liked', name: 'Tus canciones guardadas', image: null }],
-    });
-  } catch (err) {
-    console.error('Error en /api/playlists:', err.response?.data || err.message);
-    res.status(500).json({ error: 'No se han podido cargar las playlists' });
-  }
-});
-
-// ---------------------------------------------------------------------------
-// API: obtener las canciones de una playlist (o de "liked songs")
-// ---------------------------------------------------------------------------
-
-app.get('/api/tracks/:playlistId', requireAuth, async (req, res) => {
-  const { playlistId } = req.params;
-  try {
-    let tracks = [];
-    let url;
-
-    if (playlistId === 'liked') {
-      url = 'https://api.spotify.com/v1/me/tracks?limit=50';
-    } else {
-      url = `https://api.spotify.com/v1/playlists/${playlistId}/tracks?limit=100`;
-    }
-
-    while (url) {
-      const { data } = await axios.get(url, {
-        headers: { Authorization: `Bearer ${req.spotifyToken}` },
-      });
-
-      const items = data.items
-        .map((item) => item.track)
-        .filter((t) => t && t.id && t.name)
-        .map((t) => ({
-          id: t.id,
-          name: t.name,
-          artist: t.artists.map((a) => a.name).join(', '),
-          album: t.album?.name,
-          durationMs: t.duration_ms,
-          image: t.album?.images?.[0]?.url || null,
-        }));
-
-      tracks = tracks.concat(items);
-      url = data.next;
     }
 
     const seen = new Set();
