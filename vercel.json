@@ -4,6 +4,10 @@
     { "src": "server/index.js", "use": "@vercel/node" }
   ],
   "routes": [
+    { "src": "/api/(.*)", "dest": "server/index.js" },
+    { "src": "/login", "dest": "server/index.js" },
+    { "src": "/callback", "dest": "server/index.js" },
+    { "src": "/logout", "dest": "server/index.js" },
     { "src": "/(.*)", "dest": "server/index.js" }
   ]
 }
